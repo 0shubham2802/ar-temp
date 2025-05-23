@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="map_refresh_button" type="id" />
+    <item name="map_error_container" type="id" />
+    <item name="map_error_text" type="id" />
+</resources> 

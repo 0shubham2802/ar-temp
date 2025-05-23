@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".ARActivity">
+
+    <!-- AR View takes up the whole screen - using GLSurfaceView instead of HelloGeoView -->
+    <android.opengl.GLSurfaceView
+        android:id="@+id/ar_surface_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- UI Controls overlay on top of AR View -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Tracking quality indicator -->
+        <TextView
+            android:id="@+id/tracking_quality"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#88000000"
+            android:gravity="center"
+            android:padding="8dp"
+            android:text="Tracking: INITIALIZING"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+    <!-- Help button in top-right corner -->
+    <Button
+        android:id="@+id/help_button"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="end|top"
+        android:layout_margin="16dp"
+        android:background="@android:drawable/ic_menu_help"
+        android:backgroundTint="#FFFFFF"
+        android:contentDescription="Help" />
+
+    <!-- Direction text above the button -->
+    <TextView
+        android:id="@+id/direction_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="70dp"
+        android:background="#AA000000"
+        android:gravity="center"
+        android:padding="12dp"
+        android:text="Preparing navigation..."
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:visibility="visible" />
+
+    <!-- Return to map button at bottom -->
+    <Button
+        android:id="@+id/return_to_map_button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="#2196F3"
+        android:padding="12dp"
+        android:text="Return to Map"
+        android:textColor="#FFFFFF" />
+
+    <!-- Distance indicator (top-left) -->
+    <TextView
+        android:id="@+id/distance_indicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="start|top"
+        android:layout_margin="16dp"
+        android:background="#88000000"
+        android:padding="8dp"
+        android:text="Calculating..."
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:visibility="visible" />
+
+</FrameLayout> 
