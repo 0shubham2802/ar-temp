@@ -31,3 +31,12 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# New additions from the code block
+.DS_Store
+gen/
+out/
+.navigation/
+gradle-app.setting
+!gradle-wrapper.jar
+.gradletasknamecache

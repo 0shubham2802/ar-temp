@@ -50,6 +50,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
+import android.graphics.Color
 
 /**
  * Split-screen activity showing both AR and Map views simultaneously
@@ -91,6 +92,11 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
     private var lastSearchRunnable: Runnable? = null
     private lateinit var recentPlacesManager: RecentPlacesManager
     
+    private var navigationInstructions = mutableListOf<String>()
+    private var navigationSteps = mutableListOf<DirectionsHelper.DirectionStep>()
+    private var currentStepIndex = 0
+    private var navigationUpdateHandler: Handler? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -759,9 +765,8 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         isNavigating = true
         
         // Update UI
-        findViewById<Button>(R.id.navigateButton).visibility = View.GONE
-        val stopButton = findViewById<Button>(R.id.navigateButton)
-        stopButton?.visibility = View.VISIBLE
+        findViewById<Button>(R.id.navigateButton)?.visibility = View.GONE
+        findViewById<Button>(R.id.stopNavigateButton)?.visibility = View.VISIBLE
         
         // Fetch and display directions
         fetchAndDisplayDirections(currentLocation!!, destinationLatLng!!)
@@ -781,6 +786,117 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         } catch (e: Exception) {
             Log.e(TAG, "Error starting AR navigation", e)
         }
+    }
+    
+    private fun startNavigationUpdates() {
+        // Cancel any existing handler
+        navigationUpdateHandler?.removeCallbacksAndMessages(null)
+        
+        // Create new handler
+        navigationUpdateHandler = Handler(Looper.getMainLooper())
+        
+        // Create runnable that updates the current instruction based on user's location
+        val navigationUpdateRunnable = object : Runnable {
+            override fun run() {
+                updateNavigationInstruction()
+                navigationUpdateHandler?.postDelayed(this, 3000) // Update every 3 seconds
+            }
+        }
+        
+        // Start the updates
+        navigationUpdateHandler?.post(navigationUpdateRunnable)
+    }
+    
+    private fun updateNavigationInstruction() {
+        try {
+            val session = arCoreSessionHelper.session ?: return
+            val earth = session.earth ?: return
+            
+            if (earth.trackingState != TrackingState.TRACKING) return
+            if (navigationSteps.isEmpty()) return
+            
+            // Get current position
+            val pose = earth.cameraGeospatialPose
+            val currentLatLng = LatLng(pose.latitude, pose.longitude)
+            
+            // Find the closest step
+            var closestStepIndex = 0
+            var minDistance = Double.MAX_VALUE
+            
+            for (i in navigationSteps.indices) {
+                val step = navigationSteps[i]
+                val stepStart = step.startLocation
+                
+                // Calculate distance to step start
+                val distance = calculateDistance(
+                    currentLatLng.latitude, currentLatLng.longitude,
+                    stepStart.latitude, stepStart.longitude
+                )
+                
+                if (distance < minDistance) {
+                    minDistance = distance
+                    closestStepIndex = i
+                }
+            }
+            
+            // If we've moved to a new step, update the instruction
+            if (closestStepIndex != currentStepIndex && closestStepIndex < navigationInstructions.size) {
+                currentStepIndex = closestStepIndex
+                
+                runOnUiThread {
+                    // Animate text change
+                    findViewById<TextView>(R.id.directionsText)?.animate()
+                        ?.alpha(0f)
+                        ?.setDuration(150)
+                        ?.withEndAction {
+                            findViewById<TextView>(R.id.directionsText)?.apply {
+                                text = navigationInstructions[currentStepIndex]
+                                animate()
+                                    ?.alpha(1f)
+                                    ?.setDuration(150)
+                                    ?.start()
+                            }
+                        }
+                        ?.start()
+                }
+            }
+            
+            // If we're close to destination, show arrival message
+            val destination = destinationLatLng ?: return
+            val distanceToDestination = calculateDistance(
+                currentLatLng.latitude, currentLatLng.longitude,
+                destination.latitude, destination.longitude
+            )
+            
+            if (distanceToDestination < 20 && navigationInstructions.isNotEmpty()) { // Within 20 meters
+                runOnUiThread {
+                    findViewById<TextView>(R.id.directionsText)?.apply {
+                        text = "You have arrived at your destination"
+                        setBackgroundColor(Color.parseColor("#AA006400")) // Dark green
+                    }
+                    
+                    // Stop updating
+                    navigationUpdateHandler?.removeCallbacksAndMessages(null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating navigation instruction", e)
+        }
+    }
+
+    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371e3 // Earth's radius in meters
+        val φ1 = lat1 * Math.PI / 180
+        val φ2 = lat2 * Math.PI / 180
+        val Δφ = (lat2 - lat1) * Math.PI / 180
+        val Δλ = (lon2 - lon1) * Math.PI / 180
+
+        val a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ/2) * Math.sin(Δλ/2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+
+        return r * c
     }
     
     private fun fetchAndDisplayDirections(origin: LatLng, destination: LatLng) {
@@ -821,6 +937,13 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                                 }
                             }
                             
+                            // Store navigation instructions and steps
+                            navigationInstructions = instructions.toMutableList()
+                            navigationSteps = steps.toMutableList()
+                            
+                            // Start navigation updates
+                            startNavigationUpdates()
+                            
                             Toast.makeText(this@SplitScreenActivity, "Navigation started", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -844,10 +967,8 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                             // Draw direct line on map
                             drawRouteOnMap(simplePath)
                             
-                            findViewById<TextView>(R.id.directionsText)?.apply {
-                                text = "Follow the direct path to destination"
-                                visibility = View.VISIBLE
-                            }
+                            // Hide directions text
+                            findViewById<TextView>(R.id.directionsText)?.visibility = View.GONE
                         }
                     }
                 }
@@ -1057,9 +1178,12 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun stopNavigation() {
         isNavigating = false
         
+        // Stop navigation updates
+        navigationUpdateHandler?.removeCallbacksAndMessages(null)
+        
         // Update UI
-        findViewById<Button>(R.id.stopNavigateButton).visibility = View.GONE
-        findViewById<Button>(R.id.navigateButton).visibility = View.VISIBLE
+        findViewById<Button>(R.id.stopNavigateButton)?.visibility = View.GONE
+        findViewById<Button>(R.id.navigateButton)?.visibility = View.VISIBLE
         
         // Clear route visualization
         googleMap?.clear()
@@ -1069,6 +1193,11 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         
         // Hide directions text
         findViewById<TextView>(R.id.directionsText)?.visibility = View.GONE
+        
+        // Clear navigation data
+        navigationInstructions.clear()
+        navigationSteps.clear()
+        currentStepIndex = 0
         
         Toast.makeText(this, "Navigation stopped", Toast.LENGTH_SHORT).show()
     }
