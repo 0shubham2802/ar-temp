@@ -1221,23 +1221,20 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             surfaceView.setEGLContextClientVersion(2)
             surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
             
+            // Create a single SampleRender instance
+            val sampleRender = SampleRender(surfaceView, renderer, assets)
+            
             // Create a wrapper renderer that implements GLSurfaceView.Renderer
             val wrapperRenderer = object : GLSurfaceView.Renderer {
                 override fun onSurfaceCreated(gl: javax.microedition.khronos.opengles.GL10?, config: javax.microedition.khronos.egl.EGLConfig?) {
-                    // Create SampleRender instance
-                    val sampleRender = SampleRender(surfaceView, renderer, assets)
                     renderer.onSurfaceCreated(sampleRender)
                 }
                 
                 override fun onSurfaceChanged(gl: javax.microedition.khronos.opengles.GL10?, width: Int, height: Int) {
-                    // Get the SampleRender instance from the renderer
-                    val sampleRender = SampleRender(surfaceView, renderer, assets)
                     renderer.onSurfaceChanged(sampleRender, width, height)
                 }
                 
                 override fun onDrawFrame(gl: javax.microedition.khronos.opengles.GL10?) {
-                    // Get the SampleRender instance from the renderer
-                    val sampleRender = SampleRender(surfaceView, renderer, assets)
                     renderer.onDrawFrame(sampleRender)
                 }
             }
@@ -1302,8 +1299,8 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             // Clean up AR session
             arCoreSessionHelper.onDestroy()
             
-            // Clean up renderer
-            renderer.onDestroy()
+            // Clean up renderer resources
+            renderer.clearAnchors()
             
             Log.d(TAG, "Activity destroyed successfully")
         } catch (e: Exception) {
@@ -1394,6 +1391,64 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error restoring instance state", e)
+        }
+    }
+
+    private fun setupMapFragment() {
+        try {
+            Log.d(TAG, "Setting up map fragment")
+            
+            // Initialize map fragment
+            mapFragment = supportFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
+            
+            // Set a timeout for map loading
+            val mapLoadingTimeout = Handler(Looper.getMainLooper())
+            val timeoutRunnable = Runnable {
+                Log.e(TAG, "Map loading timed out")
+                findViewById<LinearLayout>(R.id.map_loading_container)?.visibility = View.GONE
+                Toast.makeText(this, "Map loading timed out. Please check your internet connection.", Toast.LENGTH_LONG).show()
+            }
+            
+            mapLoadingTimeout.postDelayed(timeoutRunnable, 20000)
+            
+            // Initialize the map asynchronously
+            mapFragment.getMapAsync(this)
+            
+            Log.d(TAG, "Map fragment setup completed")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up map fragment", e)
+            Toast.makeText(this, "Error initializing map", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    private fun setupUI() {
+        try {
+            Log.d(TAG, "Setting up UI components")
+            
+            // Set up search suggestions
+            setupSearchSuggestions()
+            
+            // Set up UI controls
+            setupUIControls()
+            
+            // Get destination from intent if available
+            if (intent.hasExtra("DESTINATION_LAT") && intent.hasExtra("DESTINATION_LNG")) {
+                val lat = intent.getDoubleExtra("DESTINATION_LAT", 0.0)
+                val lng = intent.getDoubleExtra("DESTINATION_LNG", 0.0)
+                
+                if (lat != 0.0 && lng != 0.0) {
+                    Log.d(TAG, "Setting destination from intent: $lat, $lng")
+                    destinationLatLng = LatLng(lat, lng)
+                }
+            }
+            
+            // Get current location
+            getCurrentLocation()
+            
+            Log.d(TAG, "UI setup completed")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up UI", e)
+            Toast.makeText(this, "Error setting up UI: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 } 
