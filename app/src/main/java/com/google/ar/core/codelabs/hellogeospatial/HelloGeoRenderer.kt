@@ -82,6 +82,11 @@ class HelloGeoRenderer(val context: Context) :
   lateinit var arrowMesh: Mesh
   lateinit var arrowShader: Shader
   lateinit var arrowTexture: Texture
+  
+  // Destination marker
+  lateinit var destinationMesh: Mesh
+  lateinit var destinationShader: Shader
+  lateinit var destinationTexture: Texture
 
   // Temporary matrix allocated here to reduce number of allocations for each frame.
   val modelMatrix = FloatArray(16)
@@ -158,17 +163,50 @@ class HelloGeoRenderer(val context: Context) :
           
       // Load navigation arrow assets
       try {
-        // Use existing marker as arrow since the arrow models don't exist
-        arrowTexture = virtualObjectTexture
-        arrowMesh = virtualObjectMesh
-        arrowShader = virtualObjectShader
-        Log.d(TAG, "Using existing marker as arrow due to missing arrow assets")
+        arrowTexture = Texture.createFromAsset(
+          render,
+          "models/materials.mtl",
+          Texture.WrapMode.CLAMP_TO_EDGE,
+          Texture.ColorFormat.SRGB
+        )
+        arrowMesh = Mesh.createFromAsset(render, "models/navigation_arrow.obj")
+        arrowShader = Shader.createFromAssets(
+          render,
+          "shaders/ar_unlit_object.vert",
+          "shaders/ar_unlit_object.frag",
+          /*defines=*/ null)
+          .setTexture("u_Texture", arrowTexture)
+        Log.d(TAG, "Successfully loaded navigation arrow assets")
       } catch (e: IOException) {
-        Log.e(TAG, "Failed to read navigation assets", e)
+        Log.e(TAG, "Failed to read navigation arrow assets", e)
         // Fallback to using the same assets as the marker
         arrowTexture = virtualObjectTexture
         arrowMesh = virtualObjectMesh
         arrowShader = virtualObjectShader
+      }
+      
+      // Load destination marker assets
+      try {
+        destinationTexture = Texture.createFromAsset(
+          render,
+          "models/materials.mtl",
+          Texture.WrapMode.CLAMP_TO_EDGE,
+          Texture.ColorFormat.SRGB
+        )
+        destinationMesh = Mesh.createFromAsset(render, "models/destination_marker.obj")
+        destinationShader = Shader.createFromAssets(
+          render,
+          "shaders/ar_unlit_object.vert",
+          "shaders/ar_unlit_object.frag",
+          /*defines=*/ null)
+          .setTexture("u_Texture", destinationTexture)
+        Log.d(TAG, "Successfully loaded destination marker assets")
+      } catch (e: IOException) {
+        Log.e(TAG, "Failed to read destination marker assets", e)
+        // Fallback to using the same assets as the marker
+        destinationTexture = virtualObjectTexture
+        destinationMesh = virtualObjectMesh
+        destinationShader = virtualObjectShader
       }
 
       backgroundRenderer.setUseDepthVisualization(render, false)
@@ -355,57 +393,53 @@ class HelloGeoRenderer(val context: Context) :
           val isWithinVisibleRange = isAnchorInVisibleRange(anchor, cameraGeospatialPose)
           
           // Different rendering for different points in the path
-          when {
-              // Start point (green)
-              anchorData == AnchorType.START -> {
-                  if (isWithinVisibleRange) {
-                      Matrix.scaleM(modelMatrix, 0, 0.5f, 0.5f, 1.5f)
-                      Matrix.translateM(modelMatrix, 0, 0f, 0f, 0.5f)
-                      drawAnchorWithColor(render, modelMatrix, 0f, 1f, 0f, 1f)
-                  }
+          when (anchorData) {
+            AnchorType.DESTINATION -> {
+              // Draw destination marker
+              Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
+              Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
+              
+              // Set color for destination marker
+              val pulseFreq = 0.003f
+              val pulseValue = 0.7f + 0.3f * sin((pulseFreq * System.currentTimeMillis()).toDouble()).toFloat()
+              destinationShader.setVec4("u_Color", floatArrayOf(1f, 0f, 0f, pulseValue))
+              
+              destinationShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix)
+              render.draw(destinationMesh, destinationShader)
+            }
+            AnchorType.TURN -> {
+              // Draw arrow for turns
+              Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
+              Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
+              
+              // Set color for turn arrows
+              arrowShader.setVec4("u_Color", floatArrayOf(1f, 1f, 0f, 0.8f)) // Yellow
+              
+              arrowShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix)
+              render.draw(arrowMesh, arrowShader)
+            }
+            else -> {
+              // Draw regular waypoints with the default marker
+              Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0)
+              Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0)
+              
+              // Set color based on distance
+              val distance = calculateDistance(
+                currentPosition.latitude, currentPosition.longitude,
+                cameraGeospatialPose.latitude, cameraGeospatialPose.longitude
+              )
+              
+              val colorArray = when {
+                distance < 5f -> floatArrayOf(0f, 1f, 0.5f, 0.8f) // Green when close
+                distance < 20f -> floatArrayOf(0f, 0.7f, 1f, 0.8f) // Blue-green when medium
+                else -> floatArrayOf(0f, 0.5f, 1f, 0.8f) // Blue when far
               }
-              // Destination point (red)
-              anchorData == AnchorType.DESTINATION -> {
-                  // Always show destination with large marker
-                  Matrix.scaleM(modelMatrix, 0, 1.0f, 1.0f, 2.0f)
-                  Matrix.translateM(modelMatrix, 0, 0f, 0f, 1.0f)
-                  // Pulsate the destination for better visibility
-                  val pulsateFrequency = 0.003f
-                  val currentTimeMillis = System.currentTimeMillis().toFloat()
-                  val sinResult = sin((pulsateFrequency * currentTimeMillis).toDouble())
-                  val sinValue = sinResult.toFloat()
-                  val pulsateValue = 0.7f + 0.3f * sinValue
-                  drawAnchorWithColor(render, modelMatrix, 1f, 0f, 0f, pulsateValue)
-              }
-              // Turn points (yellow)
-              anchorData == AnchorType.TURN -> {
-                  if (isWithinVisibleRange) {
-                      Matrix.scaleM(modelMatrix, 0, 0.6f, 0.6f, 1.0f)
-                      Matrix.translateM(modelMatrix, 0, 0f, 0f, 0.5f)
-                      drawAnchorWithColor(render, modelMatrix, 1f, 0.8f, 0f, 0.9f)
-                  }
-              }
-              // Regular waypoint
-              else -> {
-                  if (isWithinVisibleRange) {
-                      // Smaller blue dots for the path
-                      Matrix.scaleM(modelMatrix, 0, 0.3f, 0.3f, 0.8f)
-                      Matrix.translateM(modelMatrix, 0, 0f, 0f, 0.4f)
-                      drawAnchorWithColor(render, modelMatrix, 0f, 0.5f, 1f, 0.7f)
-                  }
-              }
+              
+              virtualObjectShader.setVec4("u_Color", colorArray)
+              virtualObjectShader.setMat4("u_ModelViewProjection", modelViewProjectionMatrix)
+              render.draw(virtualObjectMesh, virtualObjectShader)
+            }
           }
-        }
-        
-        // Draw a floating arrow pointing to the next waypoint if it's not directly visible
-        drawDirectionalIndicator(render, cameraGeospatialPose)
-      } else {
-        // Low tracking confidence - show a warning if we haven't recently
-        val now = System.currentTimeMillis()
-        if (now - lastTrackingQualityWarningTime > 5000) {
-          Log.w(TAG, "Low tracking confidence: $trackingConfidence")
-          showError("Low tracking quality. Please ensure you're outdoors with a clear view of the sky.")
-          lastTrackingQualityWarningTime = now
         }
       }
     } catch (e: Exception) {
