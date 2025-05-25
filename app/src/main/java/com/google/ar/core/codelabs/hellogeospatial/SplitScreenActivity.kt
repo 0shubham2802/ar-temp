@@ -109,14 +109,19 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         }
         
         try {
+            Log.d(TAG, "Starting SplitScreenActivity initialization")
+            
             // Check if ARCore is supported
             if (!checkARCoreSupport()) {
+                Log.e(TAG, "ARCore not supported on this device")
                 // If not supported, redirect to map-only view
                 Toast.makeText(this, "AR not supported on this device. Redirecting to map view.", Toast.LENGTH_LONG).show()
                 startActivity(Intent(this, FallbackActivity::class.java))
                 finish()
                 return
             }
+            
+            Log.d(TAG, "ARCore is supported, setting up activity")
             
             // Set the content view
             setContentView(R.layout.activity_split_screen)
@@ -133,18 +138,23 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             // Initialize recent places manager
             recentPlacesManager = RecentPlacesManager(this)
             
+            Log.d(TAG, "Checking permissions")
             // Check for required permissions
             checkAndRequestPermissions()
             
+            Log.d(TAG, "Initializing map")
             // Initialize the map portion
             initializeMap()
             
+            Log.d(TAG, "Initializing AR")
             // Initialize the AR portion
             initializeAR()
             
+            Log.d(TAG, "Setting up UI controls")
             // Set up UI controls
             setupUIControls()
             
+            Log.d(TAG, "Setting up search suggestions")
             // Set up search suggestions
             setupSearchSuggestions()
             
@@ -154,6 +164,7 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                 val lng = intent.getDoubleExtra("DESTINATION_LNG", 0.0)
                 
                 if (lat != 0.0 && lng != 0.0) {
+                    Log.d(TAG, "Setting destination from intent: $lat, $lng")
                     destinationLatLng = LatLng(lat, lng)
                     destinationLatLng?.let { destination ->
                         // Show destination on map when ready
@@ -166,8 +177,11 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
             }
             
+            Log.d(TAG, "Getting current location")
             // Get the current location
             getCurrentLocation()
+            
+            Log.d(TAG, "SplitScreenActivity initialization complete")
         } catch (e: Exception) {
             Log.e(TAG, "Error in onCreate", e)
             Toast.makeText(this, "Error initializing: ${e.message}", Toast.LENGTH_LONG).show()
@@ -226,11 +240,25 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
     
     private fun initializeAR() {
         try {
+            // First check camera permission
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) 
+                    != PackageManager.PERMISSION_GRANTED) {
+                Log.e(TAG, "Camera permission not granted")
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.CAMERA),
+                    CAMERA_PERMISSION_CODE
+                )
+                return
+            }
+
             // Get the tracking quality indicator
             trackingQualityIndicator = findViewById(R.id.tracking_quality)
             
-            // Get the AR surface view
+            // Get and configure the AR surface view
             surfaceView = findViewById(R.id.ar_surface_view)
+            surfaceView.preserveEGLContextOnPause = true
+            surfaceView.setEGLContextClientVersion(2)
             
             // Create and initialize HelloGeoView with SplitScreenActivity
             view = HelloGeoView(this)
@@ -242,6 +270,7 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                 field.set(view, surfaceView)
             } catch (e: Exception) {
                 Log.e(TAG, "Error setting surface view", e)
+                throw e
             }
             
             // Create and initialize the renderer
@@ -251,14 +280,22 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             // Create and initialize ARCore session
             arCoreSessionHelper = ARCoreSessionLifecycleHelper(this)
             
-            // Register error handler
+            // Register error handler with more detailed logging
             arCoreSessionHelper.exceptionCallback = { exception ->
                 val message = when (exception) {
-                    is CameraNotAvailableException -> "Camera not available"
-                    else -> "AR Error: ${exception.message}"
+                    is CameraNotAvailableException -> {
+                        Log.e(TAG, "Camera not available", exception)
+                        "Camera not available. Please check camera permissions and restart the app."
+                    }
+                    else -> {
+                        Log.e(TAG, "AR Error: ${exception.javaClass.simpleName}", exception)
+                        "AR Error: ${exception.message}"
+                    }
                 }
-                Log.e(TAG, "AR error: $message", exception)
-                trackingQualityIndicator?.text = "AR Error: ${exception.javaClass.simpleName}"
+                runOnUiThread {
+                    trackingQualityIndicator?.text = message
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                }
             }
             
             // Configure the session
@@ -273,7 +310,10 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                 view.setupSession(session)
                 renderer.setSession(session)
             } else {
-                trackingQualityIndicator?.text = "Failed to create AR session"
+                val error = "Failed to create AR session"
+                Log.e(TAG, error)
+                trackingQualityIndicator?.text = error
+                throw Exception(error)
             }
             
             // Set up the renderer
@@ -281,9 +321,13 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             
             // Start tracking quality updates
             startTrackingQualityUpdates()
+            
+            Log.d(TAG, "AR initialized successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing AR", e)
             trackingQualityIndicator?.text = "AR Error: ${e.message}"
+            // Fall back to map-only mode if AR fails
+            fallbackToMapOnlyMode()
         }
     }
     
@@ -1083,10 +1127,21 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                 }
             }
             CAMERA_PERMISSION_CODE -> {
-                if (grantResults.isEmpty() || grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    Log.d(TAG, "Camera permission granted, initializing AR")
+                    // Camera permission granted, try to initialize AR again
+                    try {
+                        initializeAR()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to initialize AR after permission grant", e)
+                        Toast.makeText(this, "Failed to initialize AR: ${e.message}", Toast.LENGTH_LONG).show()
+                        fallbackToMapOnlyMode()
+                    }
+                } else {
+                    Log.e(TAG, "Camera permission denied")
                     Toast.makeText(this, "Camera permission required for AR", Toast.LENGTH_LONG).show()
                     // Switch to map-only mode if camera permission denied
-                    launchMapOnlyMode()
+                    fallbackToMapOnlyMode()
                 }
             }
         }
