@@ -230,13 +230,20 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             // Get the tracking quality indicator
             trackingQualityIndicator = findViewById(R.id.tracking_quality)
             
-            // Get and configure the AR surface view
-            setupSurfaceView()
+            // Get the surface view first
+            surfaceView = findViewById(R.id.ar_surface_view)
+            if (surfaceView == null) {
+                throw IllegalStateException("AR surface view not found in layout")
+            }
             
             // Create and initialize HelloGeoView with SplitScreenActivity
             view = HelloGeoView(this)
             
-            // Need to set the surface view
+            // Create and initialize the renderer
+            renderer = HelloGeoRenderer(this)
+            renderer.setView(view)
+            
+            // Need to set the surface view in HelloGeoView
             try {
                 val field = HelloGeoView::class.java.getDeclaredField("surfaceView")
                 field.isAccessible = true
@@ -245,10 +252,6 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                 Log.e(TAG, "Error setting surface view", e)
                 throw e
             }
-            
-            // Create and initialize the renderer
-            renderer = HelloGeoRenderer(this)
-            renderer.setView(view)
             
             // Create and initialize ARCore session
             arCoreSessionHelper = ARCoreSessionLifecycleHelper(this)
@@ -290,8 +293,8 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             view.setupSession(session)
             renderer.setSession(session)
             
-            // Set up the renderer
-            SampleRender(surfaceView, renderer, assets)
+            // Now set up the surface view with the initialized renderer
+            setupSurfaceView()
             
             // Start tracking quality updates
             startTrackingQualityUpdates()
