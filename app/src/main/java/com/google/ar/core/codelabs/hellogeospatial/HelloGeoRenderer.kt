@@ -147,7 +147,7 @@ class HelloGeoRenderer(val context: Context) :
       virtualObjectTexture =
         Texture.createFromAsset(
           render,
-          "../../assets/models/spatial_marker_baked.png",
+          "models/spatial_marker_baked.png",
           Texture.WrapMode.CLAMP_TO_EDGE,
           Texture.ColorFormat.SRGB
         )
@@ -165,7 +165,7 @@ class HelloGeoRenderer(val context: Context) :
       try {
         arrowTexture = Texture.createFromAsset(
           render,
-          "../../assets/models/materials.mtl",
+          "models/materials.mtl",
           Texture.WrapMode.CLAMP_TO_EDGE,
           Texture.ColorFormat.SRGB
         )
@@ -189,7 +189,7 @@ class HelloGeoRenderer(val context: Context) :
       try {
         destinationTexture = Texture.createFromAsset(
           render,
-          "../../assets/models/materials.mtl",
+          "models/materials.mtl",
           Texture.WrapMode.CLAMP_TO_EDGE,
           Texture.ColorFormat.SRGB
         )
