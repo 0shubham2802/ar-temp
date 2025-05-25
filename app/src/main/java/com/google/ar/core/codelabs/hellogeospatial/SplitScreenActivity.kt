@@ -111,6 +111,18 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         try {
             Log.d(TAG, "Starting SplitScreenActivity initialization")
             
+            // Check camera permission first before anything else
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) 
+                    != PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "Requesting camera permission")
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.CAMERA),
+                    CAMERA_PERMISSION_CODE
+                )
+                return
+            }
+            
             // Check if ARCore is supported
             if (!checkARCoreSupport()) {
                 Log.e(TAG, "ARCore not supported on this device")
@@ -138,53 +150,19 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             // Initialize recent places manager
             recentPlacesManager = RecentPlacesManager(this)
             
-            Log.d(TAG, "Checking permissions")
-            // Check for required permissions
-            checkAndRequestPermissions()
-            
-            Log.d(TAG, "Initializing map")
-            // Initialize the map portion
-            initializeMap()
-            
-            Log.d(TAG, "Initializing AR")
-            // Initialize the AR portion
+            // Initialize AR components
             initializeAR()
             
-            Log.d(TAG, "Setting up UI controls")
-            // Set up UI controls
-            setupUIControls()
+            // Set up map fragment
+            setupMapFragment()
             
-            Log.d(TAG, "Setting up search suggestions")
-            // Set up search suggestions
-            setupSearchSuggestions()
+            // Set up UI components
+            setupUI()
             
-            // Get destination from intent if available
-            if (intent.hasExtra("DESTINATION_LAT") && intent.hasExtra("DESTINATION_LNG")) {
-                val lat = intent.getDoubleExtra("DESTINATION_LAT", 0.0)
-                val lng = intent.getDoubleExtra("DESTINATION_LNG", 0.0)
-                
-                if (lat != 0.0 && lng != 0.0) {
-                    Log.d(TAG, "Setting destination from intent: $lat, $lng")
-                    destinationLatLng = LatLng(lat, lng)
-                    destinationLatLng?.let { destination ->
-                        // Show destination on map when ready
-                        googleMap?.addMarker(MarkerOptions().position(destination).title("Destination"))
-                        googleMap?.moveCamera(CameraUpdateFactory.newLatLngZoom(destination, 15f))
-                        
-                        // Make navigate button visible
-                        findViewById<Button>(R.id.navigateButton).visibility = View.VISIBLE
-                    }
-                }
-            }
-            
-            Log.d(TAG, "Getting current location")
-            // Get the current location
-            getCurrentLocation()
-            
-            Log.d(TAG, "SplitScreenActivity initialization complete")
+            Log.d(TAG, "Activity initialization completed successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error in onCreate", e)
-            Toast.makeText(this, "Error initializing: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Error initializing app: ${e.message}", Toast.LENGTH_LONG).show()
             fallbackToMapOnlyMode()
         }
     }
@@ -240,25 +218,20 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
     
     private fun initializeAR() {
         try {
-            // First check camera permission
+            // Double check camera permission
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) 
                     != PackageManager.PERMISSION_GRANTED) {
                 Log.e(TAG, "Camera permission not granted")
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.CAMERA),
-                    CAMERA_PERMISSION_CODE
-                )
-                return
+                throw SecurityException("Camera permission not granted")
             }
+
+            Log.d(TAG, "Initializing AR components")
 
             // Get the tracking quality indicator
             trackingQualityIndicator = findViewById(R.id.tracking_quality)
             
             // Get and configure the AR surface view
-            surfaceView = findViewById(R.id.ar_surface_view)
-            surfaceView.preserveEGLContextOnPause = true
-            surfaceView.setEGLContextClientVersion(2)
+            setupSurfaceView()
             
             // Create and initialize HelloGeoView with SplitScreenActivity
             view = HelloGeoView(this)
@@ -306,15 +279,16 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             
             // Get the session
             val session = arCoreSessionHelper.session
-            if (session != null) {
-                view.setupSession(session)
-                renderer.setSession(session)
-            } else {
+            if (session == null) {
                 val error = "Failed to create AR session"
                 Log.e(TAG, error)
                 trackingQualityIndicator?.text = error
                 throw Exception(error)
             }
+            
+            // Set up session in view and renderer
+            view.setupSession(session)
+            renderer.setSession(session)
             
             // Set up the renderer
             SampleRender(surfaceView, renderer, assets)
@@ -328,12 +302,20 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             trackingQualityIndicator?.text = "AR Error: ${e.message}"
             // Fall back to map-only mode if AR fails
             fallbackToMapOnlyMode()
+            throw e // Re-throw to be caught by onCreate
         }
     }
     
     private fun configureSession(session: Session) {
         try {
             Log.d(TAG, "Configuring AR session")
+            
+            // First check if session is valid
+            if (session.isDestroyed) {
+                Log.e(TAG, "Session is destroyed")
+                throw IllegalStateException("Session is destroyed")
+            }
+            
             session.configure(
                 session.config.apply {
                     // Enable geospatial mode
@@ -342,7 +324,11 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                     // Basic settings for navigation
                     planeFindingMode = Config.PlaneFindingMode.HORIZONTAL
                     lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
+                    
+                    // Important: Set to LATEST_CAMERA_IMAGE to ensure smooth tracking
                     updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+                    
+                    // Set focus mode to AUTO for better tracking
                     focusMode = Config.FocusMode.AUTO
                     
                     // Try to enable depth for better occlusion
@@ -350,19 +336,30 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
                         if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
                             depthMode = Config.DepthMode.AUTOMATIC
                             Log.d(TAG, "Depth mode enabled for better AR experience")
+                        } else {
+                            depthMode = Config.DepthMode.DISABLED
+                            Log.d(TAG, "Depth mode not supported on this device")
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error checking depth support", e)
+                        depthMode = Config.DepthMode.DISABLED
                     }
                     
                     // Enable cloud anchors for possible sharing features
                     cloudAnchorMode = Config.CloudAnchorMode.ENABLED
                 }
             )
-            Log.d(TAG, "AR session configured successfully")
+            
+            // Verify configuration was successful
+            if (session.config.geospatialMode != Config.GeospatialMode.ENABLED) {
+                throw IllegalStateException("Failed to enable geospatial mode")
+            }
+            
+            Log.d(TAG, "AR session configured successfully with enhanced settings")
         } catch (e: Exception) {
             Log.e(TAG, "Error configuring AR session", e)
             Toast.makeText(this, "AR configuration error: ${e.message}", Toast.LENGTH_SHORT).show()
+            throw e // Re-throw to be handled by caller
         }
     }
     
@@ -1073,16 +1070,28 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
     }
     
     private fun fallbackToMapOnlyMode() {
-        val intent = Intent(this, FallbackActivity::class.java)
-        
-        // Pass destination data if we have it
-        destinationLatLng?.let {
-            intent.putExtra("DESTINATION_LAT", it.latitude)
-            intent.putExtra("DESTINATION_LNG", it.longitude)
+        try {
+            Log.d(TAG, "Falling back to map-only mode")
+            
+            // Clean up AR resources
+            arCoreSessionHelper.session?.close()
+            surfaceView.visibility = View.GONE
+            
+            // Show map
+            findViewById<View>(R.id.map)?.visibility = View.VISIBLE
+            
+            // Update UI to indicate map-only mode
+            trackingQualityIndicator?.text = "AR Unavailable - Using Map Only"
+            trackingQualityIndicator?.setBackgroundResource(android.R.color.holo_red_light)
+            
+            Toast.makeText(this, "Switched to map-only mode", Toast.LENGTH_LONG).show()
+            
+            Log.d(TAG, "Successfully switched to map-only mode")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error switching to map-only mode", e)
+            // If we can't even fall back gracefully, just finish the activity
+            finish()
         }
-        
-        startActivity(intent)
-        finish()
     }
     
     private fun checkAndRequestPermissions() {
@@ -1198,28 +1207,84 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
     
+    private fun setupSurfaceView() {
+        try {
+            Log.d(TAG, "Setting up AR surface view")
+            
+            surfaceView = findViewById(R.id.ar_surface_view)
+            if (surfaceView == null) {
+                throw IllegalStateException("AR surface view not found in layout")
+            }
+            
+            // Configure GL settings
+            surfaceView.preserveEGLContextOnPause = true
+            surfaceView.setEGLContextClientVersion(2)
+            surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+            
+            // Set renderer
+            surfaceView.setRenderer(renderer)
+            surfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+            
+            Log.d(TAG, "AR surface view configured successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up surface view", e)
+            throw e
+        }
+    }
+    
     override fun onResume() {
         super.onResume()
         try {
+            Log.d(TAG, "Activity resuming")
+            
+            // Resume AR session
             arCoreSessionHelper.onResume()
+            
+            // Resume surface view
+            surfaceView.onResume()
+            
+            // Start tracking updates
+            startTrackingQualityUpdates()
+            
+            Log.d(TAG, "Activity resumed successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error resuming AR session", e)
+            Log.e(TAG, "Error in onResume", e)
+            Toast.makeText(this, "Error resuming AR: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     
     override fun onPause() {
         super.onPause()
         try {
+            Log.d(TAG, "Activity pausing")
+            
+            // Pause AR session
             arCoreSessionHelper.onPause()
+            
+            // Pause surface view
+            surfaceView.onPause()
+            
+            // Stop tracking updates
+            stopTrackingQualityUpdates()
+            
+            Log.d(TAG, "Activity paused successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error pausing AR session", e)
+            Log.e(TAG, "Error in onPause", e)
         }
     }
     
     override fun onDestroy() {
         super.onDestroy()
         try {
-            // Clean up any resources
+            Log.d(TAG, "Activity being destroyed")
+            
+            // Clean up AR session
+            arCoreSessionHelper.onDestroy()
+            
+            // Clean up renderer
+            renderer.onDestroy()
+            
+            Log.d(TAG, "Activity destroyed successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error in onDestroy", e)
         }
@@ -1255,5 +1320,59 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         currentStepIndex = 0
         
         Toast.makeText(this, "Navigation stopped", Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun stopTrackingQualityUpdates() {
+        try {
+            navigationUpdateHandler?.removeCallbacksAndMessages(null)
+            navigationUpdateHandler = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping tracking updates", e)
+        }
+    }
+    
+    override fun onStop() {
+        super.onStop()
+        try {
+            Log.d(TAG, "Activity stopping")
+            
+            // Stop any ongoing AR operations
+            stopTrackingQualityUpdates()
+            
+            // Release camera resources
+            arCoreSessionHelper.session?.close()
+            
+            Log.d(TAG, "Activity stopped successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in onStop", e)
+        }
+    }
+    
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        try {
+            // Save any necessary state
+            destinationLatLng?.let { destination ->
+                outState.putDouble("DESTINATION_LAT", destination.latitude)
+                outState.putDouble("DESTINATION_LNG", destination.longitude)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving instance state", e)
+        }
+    }
+    
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        try {
+            // Restore any saved state
+            if (savedInstanceState.containsKey("DESTINATION_LAT") && 
+                savedInstanceState.containsKey("DESTINATION_LNG")) {
+                val lat = savedInstanceState.getDouble("DESTINATION_LAT")
+                val lng = savedInstanceState.getDouble("DESTINATION_LNG")
+                destinationLatLng = LatLng(lat, lng)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error restoring instance state", e)
+        }
     }
 } 
