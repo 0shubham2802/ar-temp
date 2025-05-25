@@ -310,45 +310,45 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
         try {
             Log.d(TAG, "Configuring AR session")
             
-            // First check if session is valid
-            if (session.isDestroyed) {
-                Log.e(TAG, "Session is destroyed")
-                throw IllegalStateException("Session is destroyed")
-            }
-            
-            session.configure(
-                session.config.apply {
-                    // Enable geospatial mode
-                    geospatialMode = Config.GeospatialMode.ENABLED
-                    
-                    // Basic settings for navigation
-                    planeFindingMode = Config.PlaneFindingMode.HORIZONTAL
-                    lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
-                    
-                    // Important: Set to LATEST_CAMERA_IMAGE to ensure smooth tracking
-                    updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
-                    
-                    // Set focus mode to AUTO for better tracking
-                    focusMode = Config.FocusMode.AUTO
-                    
-                    // Try to enable depth for better occlusion
-                    try {
-                        if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
-                            depthMode = Config.DepthMode.AUTOMATIC
-                            Log.d(TAG, "Depth mode enabled for better AR experience")
-                        } else {
+            // Check if session is valid using try-catch instead of isDestroyed
+            try {
+                session.configure(
+                    session.config.apply {
+                        // Enable geospatial mode
+                        geospatialMode = Config.GeospatialMode.ENABLED
+                        
+                        // Basic settings for navigation
+                        planeFindingMode = Config.PlaneFindingMode.HORIZONTAL
+                        lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
+                        
+                        // Important: Set to LATEST_CAMERA_IMAGE to ensure smooth tracking
+                        updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+                        
+                        // Set focus mode to AUTO for better tracking
+                        focusMode = Config.FocusMode.AUTO
+                        
+                        // Try to enable depth for better occlusion
+                        try {
+                            if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+                                depthMode = Config.DepthMode.AUTOMATIC
+                                Log.d(TAG, "Depth mode enabled for better AR experience")
+                            } else {
+                                depthMode = Config.DepthMode.DISABLED
+                                Log.d(TAG, "Depth mode not supported on this device")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error checking depth support", e)
                             depthMode = Config.DepthMode.DISABLED
-                            Log.d(TAG, "Depth mode not supported on this device")
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error checking depth support", e)
-                        depthMode = Config.DepthMode.DISABLED
+                        
+                        // Enable cloud anchors for possible sharing features
+                        cloudAnchorMode = Config.CloudAnchorMode.ENABLED
                     }
-                    
-                    // Enable cloud anchors for possible sharing features
-                    cloudAnchorMode = Config.CloudAnchorMode.ENABLED
-                }
-            )
+                )
+            } catch (e: IllegalStateException) {
+                Log.e(TAG, "Session configuration failed - session may be invalid", e)
+                throw e
+            }
             
             // Verify configuration was successful
             if (session.config.geospatialMode != Config.GeospatialMode.ENABLED) {
@@ -1221,8 +1221,29 @@ class SplitScreenActivity : AppCompatActivity(), OnMapReadyCallback {
             surfaceView.setEGLContextClientVersion(2)
             surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
             
-            // Set renderer
-            surfaceView.setRenderer(renderer)
+            // Create a wrapper renderer that implements GLSurfaceView.Renderer
+            val wrapperRenderer = object : GLSurfaceView.Renderer {
+                override fun onSurfaceCreated(gl: javax.microedition.khronos.opengles.GL10?, config: javax.microedition.khronos.egl.EGLConfig?) {
+                    // Create SampleRender instance
+                    val sampleRender = SampleRender(surfaceView, renderer, assets)
+                    renderer.onSurfaceCreated(sampleRender)
+                }
+                
+                override fun onSurfaceChanged(gl: javax.microedition.khronos.opengles.GL10?, width: Int, height: Int) {
+                    // Get the SampleRender instance from the renderer
+                    val sampleRender = SampleRender(surfaceView, renderer, assets)
+                    renderer.onSurfaceChanged(sampleRender, width, height)
+                }
+                
+                override fun onDrawFrame(gl: javax.microedition.khronos.opengles.GL10?) {
+                    // Get the SampleRender instance from the renderer
+                    val sampleRender = SampleRender(surfaceView, renderer, assets)
+                    renderer.onDrawFrame(sampleRender)
+                }
+            }
+            
+            // Set the wrapper renderer
+            surfaceView.setRenderer(wrapperRenderer)
             surfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
             
             Log.d(TAG, "AR surface view configured successfully")
